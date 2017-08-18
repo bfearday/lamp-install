@@ -1,7 +1,8 @@
 #!/bin/bash
 
 ###
-# The purpose of this script is to automate installation of the LAMP stack (Linux, Apache, MariaDB, PHP) on RHEL 7 or Centos 7
+# The purpose of this script is to automate installation of the LAMP stack (Linux, Apache, MariaDB, PHP) 
+# on RHEL 7 or Centos 7
 ###
 
 ###
@@ -17,17 +18,24 @@ ip_addr="$(ip addr show | grep -A 2 "2:" | grep inet | cut -d " " -f 6 | cut -d 
 ###
 
 err() {
-  echo "[ERROR $(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
+  echo -e "\n[ERROR $(date +'%Y-%m-%dT%H:%M:%S%z')]: $@\n" >&2
 }
 
 pwd_prompt() {
+  counter=0
   stty -echo
-  while true; do
+  while [[ ${counter} > 3 ]]; do
     read passwd1
-    echo "Retype password:"
+    echo -e "\nRetype password: \n"
     read passwd2
     if [[ ${passwd1} != ${passwd2} ]]; then
-      echo "Passwords do not match. Try again."
+      echo -e "\nPasswords do not match. Try again.\n"
+      let counter+=1
+      if [[ ${counter} == 3 ]]; then
+        err "Failed to set mysql root password. Please run mysql_secure_installation \
+to set it manually."
+        break
+      fi  
     else
       passwd=${passwd1}
       break
@@ -37,14 +45,18 @@ pwd_prompt() {
 }
 
 mysql_inst() {
-  if $(/usr/bin/mysql -u root -e 'DELETE FROM mysql.user WHERE User=""; DELETE FROM mysql.user WHERE User="root" AND Host NOT IN ("localhost", "127.0.0.1", "::1"); DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;'); then
-    echo "Please provide a password for the root database user."
+  if $(/usr/bin/mysql -u root -e 'DELETE FROM mysql.user WHERE User=""; \
+DELETE FROM mysql.user WHERE User="root" AND Host NOT IN ("localhost", "127.0.0.1", "::1"); \
+DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;'); then
+    echo -e "\nPlease provide a password for the root database user: \n"
     pwd_prompt
     if ! $(/usr/bin/mysqladmin -u root password ${passwd}); then
-      err "Database configuration failed. There might be a root password already configured for mysql. Please run mysql_secure_installation manually."
+      err "Database configuration failed. There might be a root password already configured \
+for mysql. Please run mysql_secure_installation manually."
     fi
   else
-        err "Database configuration failed. There might be a root password already configured for mysql. Please run mysql_secure_installation manually."
+        err "Database configuration failed. There might be a root password already configured \
+for mysql. Please run mysql_secure_installation to manually set it."
     fi
 }
 
@@ -72,7 +84,7 @@ update() {
   if ! yum update -y; then
     err 'System was not updated successfully. Would you like to continue? [y/n]'
     read update
-    if [[ ${update} != "y" ]] or [[ ${update} != "yes" ]]; then
+    if [[ ${update} != "y" ]] || [[ ${update} != "yes" ]]; then
       exit 1
     fi
   fi
@@ -93,7 +105,8 @@ start_enable() {
       err "${s} could not be started. Please resolve issue and start service manually."
     fi
     if ! systemctl enable ${s}; then
-      err "${s} could not be enabled to start at boot. Please resolve issue and enable service manually."
+      err "${s} could not be enabled to start at boot. Please resolve issue and enable service \
+manually."
     fi
   done
 }
@@ -117,9 +130,11 @@ start_enable
 echo -e "\nConfiguring mysql...\n"
 mysql_inst
 
-echo -e "\nWould you like to add firewall rules for http and https? (Only firewalld supported currently) [y/n]\n"
+echo -e "\nWould you like to add firewall rules for http and https? (Only firewalld supported \
+currently) [y/n]\n"
 fw_open
 
-echo -e "\nInstallation and basic configuration has finished. You can test the Apache web server by browsing to http://${ip_addr}.\n"
+echo -e "\nInstallation and basic configuration has finished. You can test the Apache web \
+server by browsing to http://${ip_addr}.\n"
 
 exit
