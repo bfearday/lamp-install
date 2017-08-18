@@ -65,17 +65,17 @@ root_chk() {
   if [[ ${EUID} != 0 ]]; then
     err "Please rerun this script with root privileges. Exiting."
     exit 1
-   fi
+  fi
 }
 
 update() {
-  echo "Installing necessary packages..."
-  for p in ${lamp}; do
-    if ! yum install -y ${p}; then
-      err "${p} was not installed successfully. Please resolve issue and rerun script."
+  if ! yum update -y; then
+    err 'System was not updated successfully. Would you like to continue? [y/n]'
+    read update
+    if [[ ${update} != "y" ]] or [[ ${update} != "yes" ]]; then
       exit 1
     fi
-  done
+  fi
 }
 
 install() {
@@ -102,24 +102,24 @@ start_enable() {
 # Script body
 ###
 
-echo "Checking for root privileges..."
+echo -e "\nChecking for root privileges...\n"
 root_chk
 
-echo "Updating system..."
+echo -e "\nUpdating system...\n"
 update
 
-echo "Installing necessary packages..."
+echo -e "\nInstalling necessary packages...\n"
 install
 
-echo "Starting services and enabling them to start at boot..."
+echo -e "\nStarting services and enabling them to start at boot...\n"
 start_enable
 
-echo "Configuring mysql..."
+echo -e "\nConfiguring mysql...\n"
 mysql_inst
 
-echo 'Would you like to add firewall rules for http and https? (Only firewalld supported currently) [y/n]'
+echo -e "\nWould you like to add firewall rules for http and https? (Only firewalld supported currently) [y/n]\n"
 fw_open
 
-echo "Installation and basic configuration has finished. You can test the Apache web server by browsing to http://${ip_addr}."
+echo -e "\nInstallation and basic configuration has finished. You can test the Apache web server by browsing to http://${ip_addr}.\n"
 
 exit
