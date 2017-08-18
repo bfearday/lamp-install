@@ -1,0 +1,125 @@
+#!/bin/bash
+
+###
+# The purpose of this script is to automate installation of the LAMP stack (Linux, Apache, MariaDB, PHP) on RHEL 7 or Centos 7
+###
+
+###
+# Variables
+###
+
+lamp="httpd mariadb-server mariadb php-fpm php-mysql"
+services="httpd mariadb"
+ip_addr="$(ip addr show | grep -A 2 "2:" | grep inet | cut -d " " -f 6 | cut -d "/" -f1)"
+
+###
+# Functions
+###
+
+err() {
+  echo "[ERROR $(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
+}
+
+pwd_prompt() {
+  stty -echo
+  while true; do
+    read passwd1
+    echo "Retype password:"
+    read passwd2
+    if [[ ${passwd1} != ${passwd2} ]]; then
+      echo "Passwords do not match. Try again."
+    else
+      passwd=${passwd1}
+      break
+    fi
+  done
+  stty echo
+}
+
+mysql_inst() {
+  if $(/usr/bin/mysql -u root -e 'DELETE FROM mysql.user WHERE User=""; DELETE FROM mysql.user WHERE User="root" AND Host NOT IN ("localhost", "127.0.0.1", "::1"); DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;'); then
+    echo "Please provide a password for the root database user."
+    pwd_prompt
+    if ! $(/usr/bin/mysqladmin -u root password ${passwd}); then
+      err "Database configuration failed. There might be a root password already configured for mysql. Please run mysql_secure_installation manually."
+    fi
+  else
+        err "Database configuration failed. There might be a root password already configured for mysql. Please run mysql_secure_installation manually."
+    fi
+}
+
+fw_open() {
+  read firewall
+  if [[ ${firewall} == "y" ]] || [[ ${firewall} == "yes" ]]; then
+    if [[ $(systemctl show firewalld.service -p ActiveState) == "ActiveState=active" ]]; then
+      firewall-cmd --permanent --zone=public --add-service=http
+      firewall-cmd --permanent --zone=public --add-service=https
+      firewall-cmd --reload
+    else
+      err "Firewalld is not currently active. Please manually open firewall ports."
+    fi
+  fi
+}
+
+root_chk() {
+  if [[ ${EUID} != 0 ]]; then
+    err "Please rerun this script with root privileges. Exiting."
+    exit 1
+   fi
+}
+
+update() {
+  echo "Installing necessary packages..."
+  for p in ${lamp}; do
+    if ! yum install -y ${p}; then
+      err "${p} was not installed successfully. Please resolve issue and rerun script."
+      exit 1
+    fi
+  done
+}
+
+install() {
+  for p in ${lamp}; do
+    if ! yum install -y ${p}; then
+      err "${p} was not installed successfully. Please resolve issue and rerun script."
+      exit 1
+    fi
+  done
+}
+
+start_enable() {
+  for s in ${services}; do
+    if ! systemctl start ${s}; then
+      err "${s} could not be started. Please resolve issue and start service manually."
+    fi
+    if ! systemctl enable ${s}; then
+      err "${s} could not be enabled to start at boot. Please resolve issue and enable service manually."
+    fi
+  done
+}
+
+###
+# Script body
+###
+
+echo "Checking for root privileges..."
+root_chk
+
+echo "Updating system..."
+update
+
+echo "Installing necessary packages..."
+install
+
+echo "Starting services and enabling them to start at boot..."
+start_enable
+
+echo "Configuring mysql..."
+mysql_inst
+
+echo 'Would you like to add firewall rules for http and https? (Only firewalld supported currently) [y/n]'
+fw_open
+
+echo "Installation and basic configuration has finished. You can test the Apache web server by browsing to http://${ip_addr}."
+
+exit
