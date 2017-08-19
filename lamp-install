@@ -1,78 +1,37 @@
 #!/bin/bash
 
-###
-# The purpose of this script is to automate installation of the LAMP stack (Linux, Apache, MariaDB, PHP) 
-# on RHEL 7 or Centos 7
-###
+#####
+# 
+# The purpose of this script is to automate installation of the LAMP stack 
+# (Linux, Apache, MariaDB, PHP) on RHEL 7 or CentOS 7
+#
+# TODO: Add support for previous versions of RHEL/CentOS, add menu to select 
+# which steps to perform, configure applications for security best practices, 
+# add options to install additional web applications (WordPress, wikis, etc.), 
+# add support for python/perl instead/in addition to PHP, add support for other 
+# Linux distros
+#
+#####
 
 ###
 # Variables
 ###
 
-lamp="httpd mariadb-server mariadb php-fpm php-mysql"
-services="httpd mariadb"
-ip_addr="$(ip addr show | grep -A 2 "2:" | grep inet | cut -d " " -f 6 | cut -d "/" -f1)"
+LAMP_STACK="httpd mariadb-server mariadb php-fpm php-mysql"
+SERVICES="httpd mariadb"
+IP_ADDR="$(ip addr show | grep -A 2 "2:" | grep inet | cut -d " " -f 6 | cut -d "/" -f1)"
 
 ###
 # Functions
 ###
 
+# Basic error message generator, accepts input and echos error message to stderr
+# TODO: build in support for log file, different verbosity levels
 err() {
   echo -e "\n[ERROR $(date +'%Y-%m-%dT%H:%M:%S%z')]: $@\n" >&2
 }
 
-pwd_prompt() {
-  counter=0
-  stty -echo
-  while [[ ${counter} > 3 ]]; do
-    read passwd1
-    echo -e "\nRetype password: \n"
-    read passwd2
-    if [[ ${passwd1} != ${passwd2} ]]; then
-      echo -e "\nPasswords do not match. Try again.\n"
-      let counter+=1
-      if [[ ${counter} == 3 ]]; then
-        err "Failed to set mysql root password. Please run mysql_secure_installation \
-to set it manually."
-        break
-      fi  
-    else
-      passwd=${passwd1}
-      break
-    fi
-  done
-  stty echo
-}
-
-mysql_inst() {
-  if $(/usr/bin/mysql -u root -e 'DELETE FROM mysql.user WHERE User=""; \
-DELETE FROM mysql.user WHERE User="root" AND Host NOT IN ("localhost", "127.0.0.1", "::1"); \
-DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;'); then
-    echo -e "\nPlease provide a password for the root database user: \n"
-    pwd_prompt
-    if ! $(/usr/bin/mysqladmin -u root password ${passwd}); then
-      err "Database configuration failed. There might be a root password already configured \
-for mysql. Please run mysql_secure_installation manually."
-    fi
-  else
-        err "Database configuration failed. There might be a root password already configured \
-for mysql. Please run mysql_secure_installation to manually set it."
-    fi
-}
-
-fw_open() {
-  read firewall
-  if [[ ${firewall} == "y" ]] || [[ ${firewall} == "yes" ]]; then
-    if [[ $(systemctl show firewalld.service -p ActiveState) == "ActiveState=active" ]]; then
-      firewall-cmd --permanent --zone=public --add-service=http
-      firewall-cmd --permanent --zone=public --add-service=https
-      firewall-cmd --reload
-    else
-      err "Firewalld is not currently active. Please manually open firewall ports."
-    fi
-  fi
-}
-
+# Checks that user executing script has root priveleges, and if not exits
 root_chk() {
   if [[ ${EUID} != 0 ]]; then
     err "Please rerun this script with root privileges. Exiting."
@@ -80,18 +39,21 @@ root_chk() {
   fi
 }
 
+# Performs full update of system, prompts user whether to continue if it fails
+# TODO: Prompt user whether to perform updates or not
 update() {
   if ! yum update -y; then
     err 'System was not updated successfully. Would you like to continue? [y/n]'
-    read update
-    if [[ ${update} != "y" ]] || [[ ${update} != "yes" ]]; then
+    read upd_prompt
+    if [[ ${upd_prompt} != "y" ]] || [[ ${upd_prompt} != "yes" ]]; then
       exit 1
     fi
   fi
 }
 
+# Installs software packages required for LAMP stack, exits script if there is a failure
 install() {
-  for p in ${lamp}; do
+  for p in ${LAMP_STACK}; do
     if ! yum install -y ${p}; then
       err "${p} was not installed successfully. Please resolve issue and rerun script."
       exit 1
@@ -99,8 +61,11 @@ install() {
   done
 }
 
+# Starts and enables httpd/mariadb services at boot, prompts user to perform actions 
+# manually if there is a failure
+# TODO: Add support for starting/enabling services via legacy upstart/init commands
 start_enable() {
-  for s in ${services}; do
+  for s in ${SERVICES}; do
     if ! systemctl start ${s}; then
       err "${s} could not be started. Please resolve issue and start service manually."
     fi
@@ -109,6 +74,36 @@ start_enable() {
 manually."
     fi
   done
+}
+
+# Replicates mysql_secure_installation script to securely configure mysql, 
+# calls pwd_prompt function and uses output to set mysql root password
+# TODO: Add ability to reset mysql root password if already set
+mysql_inst() {
+  if $(/usr/bin/mysql -u root -e 'DELETE FROM mysql.user WHERE User=""; \
+DELETE FROM mysql.user WHERE User="root" AND Host NOT IN ("localhost", "127.0.0.1", "::1"); \
+DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;'); then
+    echo -e "\nPlease provide a password for the root database user.\n"
+    /usr/bin/mysqladmin -u root password
+  else
+    err "Database configuration failed. There might be a root password already configured \
+for mysql. Please run mysql_secure_installation to manually configure it."
+  fi
+}
+
+# Accepts user input to determine whether firewall ports should be opened for HTTP/HTTPS
+# TODO: Add support for standard iptables rules, add support for opening custom ports
+fw_open() {
+  read fw_prompt
+  if [[ ${fw_prompt} == "y" ]] || [[ ${fw_prompt} == "yes" ]]; then
+    if [[ $(systemctl show firewalld.service -p ActiveState) == "ActiveState=active" ]]; then
+      firewall-cmd --permanent --zone=public --add-service=http
+      firewall-cmd --permanent --zone=public --add-service=https
+      firewall-cmd --reload
+    else
+      err "Firewalld is not currently active. Please manually open firewall ports."
+    fi
+  fi
 }
 
 ###
@@ -135,6 +130,6 @@ currently) [y/n]\n"
 fw_open
 
 echo -e "\nInstallation and basic configuration has finished. You can test the Apache web \
-server by browsing to http://${ip_addr}.\n"
+server by browsing to http://${IP_ADDR}.\n"
 
 exit
